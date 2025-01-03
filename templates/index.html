@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des données</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #e0e0e0;
+        }
+        td {
+            vertical-align: middle;
+        }
+        .textfield-container {
+            display: flex;
+            align-items: center;
+        }
+        .textfield-container input {
+            flex: 1;
+        }
+        .textfield-container button {
+            margin-left: 10px;
+            padding: 5px 10px;
+            display: none; /* Bouton "Sauvegarder" masqué par défaut */
+        }
+        button {
+            padding: 8px 12px;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .delete {
+            background-color: #f44336;
+            color: white;
+        }
+        .restore {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .save {
+            background-color: #2196F3;
+            color: white;
+        }
+        tr.deleted {
+            opacity: 0.25;
+        }
+        tr.deleted button.restore {
+            opacity: 1 !important;
+        }
+
+        /* -- Mode sombre -- */
+        .dark-mode {
+            background-color: #1e293b;
+            color: #cbd5e1;
+        }
+        .dark-mode th {
+            background-color: #334155;
+        }
+        .dark-mode tr:nth-child(odd) {
+            background-color: #29343f;
+        }
+        .dark-mode tr:nth-child(even) {
+            background-color: #1e293b;
+        }
+        .dark-mode input[type="text"] {
+            background-color: #334155;
+            color: #cbd5e1;
+            border: 1px solid #475569;
+        }
+
+        /* -- Animation de surbrillance -- */
+        @keyframes highlightAnimation {
+            0% {
+                background-color: rgba(0, 255, 0, 0.5); /* vert transparent */
+            }
+            100% {
+                background-color: transparent;
+            }
+        }
+        .highlight-transition {
+            animation: highlightAnimation 1.5s forwards;
+        }
+
+    </style>
+</head>
+<body>
+    <button onclick="toggleDarkMode()">🌙 Mode sombre</button>
+    <h1>Gestion des données</h1>
+
+    <p id="stats"></p>
+    <input type="text" id="search-bar" placeholder="Rechercher un aliment..." onkeyup="searchData()" />
+    <p id="results-count"></p>
+
+    <table id="data-table">
+        <thead>
+            <tr>
+                <th>Nom</th>
+                <th>Nom modifié</th>
+                <th>Calories</th>
+                <th>Protéines</th>
+                <th>Glucides</th>
+                <th>Sucres</th>
+                <th>Lipides</th>
+                <th>Lipides saturées</th>
+                <th>Fibres</th>
+                <th>Sel</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        // Mode sombre
+        let darkMode = false;
+        // Stocke le champ actuellement en édition (pour masquer l’autre bouton "Sauvegarder")
+        let currentEditingFoodName = null;
+
+        // Toggle dark mode
+        function toggleDarkMode() {
+            darkMode = !darkMode;
+            document.body.classList.toggle("dark-mode", darkMode);
+        }
+
+        // Au chargement de la page, on charge toute la liste (pas de recherche)
+        $(document).ready(function() {
+            loadData();
+        });
+
+        // Charger toutes les données (liste complète)
+        function loadData() {
+            $.getJSON("/all", function(response) {
+                const { data, stats } = response;
+                const parsedData = JSON.parse(data);
+                renderTable(parsedData);
+                renderStats(stats);
+                $("#results-count").text("");
+            });
+        }
+
+        // Chercher selon la barre #search-bar
+        function searchData() {
+            const query = $("#search-bar").val();
+            $.getJSON(`/search?query=${query}`, function(response) {
+                const { data, stats } = response;
+                const parsedData = JSON.parse(data);
+                renderTable(parsedData);
+                renderStats(stats);
+                $("#results-count").text(`Résultats : ${stats.results || parsedData.length}`);
+            });
+        }
+
+        // Afficher stats : total, actifs, supprimés
+        function renderStats(stats) {
+            $("#stats").text(
+                `Aliments totaux : ${stats.total}, Actifs : ${stats.active}, Supprimés : ${stats.deleted}`
+            );
+        }
+
+        // Nettoyer un food_name pour générer un ID HTML sûr
+        function sanitizeFoodName(foodName) {
+            return foodName.replace(/\s+/g, "_").replace(/[^\wÀ-ÖØ-öø-ÿ_]/g, "");
+        }
+
+        // Affiche les lignes du tableau
+        function renderTable(data) {
+            const tbody = $("#data-table tbody");
+            tbody.empty();
+
+            data.forEach((row) => {
+                const isDeleted = row.deleted ? "deleted" : "";
+                const safeName = sanitizeFoodName(row.food_name);
+
+                tbody.append(`
+                    <tr class="${isDeleted}" id="row-${safeName}">
+                        <td>${row.food_name ?? ""}</td>
+                        <td>
+                            <div class="textfield-container">
+                                <input
+                                    id="input-${safeName}"
+                                    type="text"
+                                    value="${row.new_name || ""}"
+                                    data-old-value="${row.new_name || ""}"
+                                    onfocus="focusTextField('${safeName}')"
+                                />
+                                <button
+                                    class="save"
+                                    id="save-${safeName}"
+                                    style="display:none;"
+                                    onclick="updateName('${row.food_name}', this.previousElementSibling.value)"
+                                >
+                                    Sauvegarder
+                                </button>
+                            </div>
+                        </td>
+                        <td>${row.kcal ?? ""}</td>
+                        <td>${row.proteins ?? ""}</td>
+                        <td>${row.carbs ?? ""}</td>
+                        <td>${row.carbs_sugar ?? ""}</td>
+                        <td>${row.fats ?? ""}</td>
+                        <td>${row.fats_saturated ?? ""}</td>
+                        <td>${row.fibers ?? ""}</td>
+                        <td>${row.salt ?? ""}</td>
+                        <td>
+                            ${
+                                row.deleted
+                                ? `<button class="restore" onclick="restoreRow('${row.food_name}')">Restaurer</button>`
+                                : `<button class="delete" onclick="deleteRow('${row.food_name}')">Supprimer</button>`
+                            }
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+
+        // Gérer le focus d'un input => un seul bouton "Sauvegarder" à la fois
+        function focusTextField(safeName) {
+            if (currentEditingFoodName && currentEditingFoodName !== safeName) {
+                revertTextField(currentEditingFoodName);
+            }
+            currentEditingFoodName = safeName;
+            $(`#save-${safeName}`).show();
+        }
+
+        // Réinitialise un input si on n'a pas sauvegardé
+        function revertTextField(safeName) {
+            const input = $(`#input-${safeName}`);
+            const oldVal = input.attr("data-old-value") || "";
+            input.val(oldVal);
+            $(`#save-${safeName}`).hide();
+            if (currentEditingFoodName === safeName) {
+                currentEditingFoodName = null;
+            }
+        }
+
+        // Fait un refresh en restant sur la même query, puis surligne la ligne modifiée
+        function reloadDataAndHighlight(foodName) {
+            const currentQuery = $("#search-bar").val().trim();
+            if (currentQuery) {
+                // On refait la recherche
+                $.getJSON(`/search?query=${currentQuery}`, function(response) {
+                    const { data, stats } = response;
+                    const parsedData = JSON.parse(data);
+                    renderTable(parsedData);
+                    renderStats(stats);
+                    $("#results-count").text(`Résultats : ${stats.results || parsedData.length}`);
+                    highlightRow(foodName);
+                });
+            } else {
+                // On recharge la liste complète
+                $.getJSON("/all", function(response) {
+                    const { data, stats } = response;
+                    const parsedData = JSON.parse(data);
+                    renderTable(parsedData);
+                    renderStats(stats);
+                    $("#results-count").text("");
+                    highlightRow(foodName);
+                });
+            }
+        }
+
+        // Applique une animation verte à la ligne modifiée
+        function highlightRow(foodName) {
+            const safeName = sanitizeFoodName(foodName);
+            const row = document.getElementById(`row-${safeName}`);
+            if (row) {
+                row.classList.add("highlight-transition");
+                // Au bout de 1.5s, on retire la classe pour éviter de cumuler les animations
+                setTimeout(() => {
+                    row.classList.remove("highlight-transition");
+                }, 1500);
+            }
+        }
+
+        // Supprimer
+        function deleteRow(foodName) {
+            $.ajax({
+                url: "/delete",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ food_name: foodName }),
+                success: function() {
+                    reloadDataAndHighlight(foodName);
+                }
+            });
+        }
+
+        // Restaurer
+        function restoreRow(foodName) {
+            $.ajax({
+                url: "/update",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ food_name: foodName, restore: true }),
+                success: function() {
+                    reloadDataAndHighlight(foodName);
+                }
+            });
+        }
+
+        // Mettre à jour le new_name
+        function updateName(foodName, newName) {
+            $.ajax({
+                url: "/update",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ food_name: foodName, new_name: newName }),
+                success: function() {
+                    $(`#save-${sanitizeFoodName(foodName)}`).hide();
+                    reloadDataAndHighlight(foodName);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
